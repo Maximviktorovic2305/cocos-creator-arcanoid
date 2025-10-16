@@ -8,147 +8,108 @@ import {
 	Node,
 	Vec2,
 	KeyCode,
-	UITransform,
+	RigidBody2D,
+	Contact2DType,
 } from 'cc'
 const { ccclass, property } = _decorator
 
 @ccclass('Ball')
 export class Ball extends Component {
-	vector: Vec2 = new Vec2(1, 2)
+	@property
+	ballSpeed: number = 500
+
 	isMoving: boolean = false
-	speed: number = 1000
-	isTapped: boolean = false
-	tapTime: number
+	body: RigidBody2D
 
 	@property(Node)
 	platform: Node = null
 
-	@property(Node)
-	topWall: Node = null
-	@property(Node)
-	leftWall: Node = null
-	@property(Node)
-	rightWall: Node = null
-	@property(Node)
-	bottomWall: Node = null
-
 	protected onLoad(): void {
-		this.platform.on('moved', this.onPlatformMoved, this)
+		// Get or add the rigidbody component
+		this.body = this.node.getComponent(RigidBody2D)
+		if (!this.body) {
+			console.warn(
+				'RigidBody2D component is missing on the ball node, adding it now',
+			)
+			this.body = this.node.addComponent(RigidBody2D)
+		}
+
+		// Configure the rigidbody for proper physics
+		this.body.type = 2 // Dynamic body
+		this.body.enabledContactListener = true
+		this.body.allowSleep = false
+
+		// Listen for input events
 		input.on(Input.EventType.KEY_DOWN, this.onKeyDown, this)
 		input.on(Input.EventType.TOUCH_START, this.onTouchStart, this)
+
+		// Register contact listener
+		this.node.on(Contact2DType.BEGIN_CONTACT, this.onBeginContact, this)
 	}
 
-	// Manual collision detection
-	checkWallCollisions() {
-		// Get the ball's collider size
-		const ballCollider = this.node.getComponent(UITransform)
-		const ballWidth = ballCollider.contentSize.width
-		const ballHeight = ballCollider.contentSize.height
-
-		// Get the wall positions and sizes
-		const leftWallTransform = this.leftWall.getComponent(UITransform)
-		const rightWallTransform = this.rightWall.getComponent(UITransform)
-		const topWallTransform = this.topWall.getComponent(UITransform)
-
-		const leftWallRight =
-			this.leftWall.x + leftWallTransform.contentSize.width / 2
-		const rightWallLeft =
-			this.rightWall.x - rightWallTransform.contentSize.width / 2
-		const topWallBottom =
-			this.topWall.y - topWallTransform.contentSize.height / 2
-
-		// Check left and right wall collisions
-		const ballLeft = this.node.x - ballWidth / 2
-		const ballRight = this.node.x + ballWidth / 2
-
-		if (ballLeft <= leftWallRight || ballRight >= rightWallLeft) {
-			this.vector.x = -this.vector.x
-		}
-
-		// Check top wall collision
-		const ballTop = this.node.y + ballHeight / 2
-		if (ballTop >= topWallBottom) {
-			this.vector.y = -this.vector.y
-		}
-
-		// Check platform collision (simplified)
-		const platformTransform = this.platform.getComponent(UITransform)
-		const platformTop =
-			this.platform.y + platformTransform.contentSize.height / 2
-		const platformLeft =
-			this.platform.x - platformTransform.contentSize.width / 2
-		const platformRight =
-			this.platform.x + platformTransform.contentSize.width / 2
-
-		const ballBottom = this.node.y - ballHeight / 2
-
-		if (
-			ballBottom <= platformTop &&
-			this.node.x >= platformLeft &&
-			this.node.x <= platformRight &&
-			this.vector.y < 0
-		) {
-			// Only when ball is moving downward
-			this.vector.y = -this.vector.y
-		}
-
-		// Check bottom wall collision (lose condition)
-		const bottomWallTransform = this.bottomWall.getComponent(UITransform)
-		const bottomWallTop =
-			this.bottomWall.y + bottomWallTransform.contentSize.height / 2
-
-		if (ballBottom <= bottomWallTop) {
-			this.resetPosition()
-		}
-	}
-
-	resetPosition() {
-		this.isMoving = false
-		this.node.y = -920
-		this.vector = new Vec2(1, 2)
-		this.node.x = this.platform.x
-	}
-
-	onPlatformMoved(pos: number) {
+	startBall() {
 		if (this.isMoving) return
 
-		this.node.x = pos
+		this.isMoving = true
+
+		// Position the ball on the platform
+		if (this.platform) {
+			this.node.setPosition(
+				this.platform.position.x,
+				this.platform.position.y + 30,
+				0,
+			)
+		}
+
+		// Launch the ball with a random direction
+		if (this.body) {
+			const angle = (Math.random() * Math.PI) / 3 + Math.PI / 3 // Random angle between 30-60 degrees
+			const vx =
+				this.ballSpeed * Math.cos(angle) * (Math.random() > 0.5 ? 1 : -1)
+			const vy = this.ballSpeed * Math.sin(angle)
+			this.body.linearVelocity = new Vec2(vx, vy)
+		}
 	}
 
-	onKeyDown(e: EventKeyboard) {
-		if (
-			!this.isMoving &&
-			(e.keyCode === KeyCode.ENTER || e.keyCode === KeyCode.SPACE)
-		) {
-			this.isMoving = true
+	resetBall() {
+		this.isMoving = false
+
+		// Reset ball position to platform position
+		if (this.platform) {
+			this.node.setPosition(
+				this.platform.position.x,
+				this.platform.position.y + 30,
+				0,
+			)
+		}
+
+		// Reset velocity
+		if (this.body) {
+			this.body.linearVelocity = new Vec2(0, 0)
+		}
+	}
+
+	onBeginContact(contact: any, selfCollider: any, otherCollider: any) {
+		// If ball hits the bottom wall, reset it
+		if (otherCollider.node.name === 'bottom_wall') {
+			this.resetBall()
 		}
 	}
 
 	onTouchStart(e: EventTouch) {
-		if (this.isMoving || e.getTouches().length !== 1) return
+		// Launch the ball on touch
+		this.startBall()
+	}
 
-		let time = new Date().getTime()
-		if (!this.isTapped) {
-			this.isTapped = true
-			this.tapTime = time
-		} else {
-			let timeDelta = time - this.tapTime
-			if (timeDelta < 400) {
-				this.isMoving = true
-				this.isTapped = false
-			} else {
-				this.tapTime = time
-			}
+	onKeyDown(e: EventKeyboard) {
+		// Launch the ball on space or enter
+		if (
+			!this.isMoving &&
+			(e.keyCode === KeyCode.SPACE || e.keyCode === KeyCode.ENTER)
+		) {
+			this.startBall()
 		}
 	}
 
-	update(deltaTime: number) {
-		if (this.isMoving) {
-			this.node.x += this.vector.x * deltaTime * this.speed
-			this.node.y += this.vector.y * deltaTime * this.speed
-
-			// Check for wall collisions
-			this.checkWallCollisions()
-		}
-	}
+	update(deltaTime: number) {}
 }

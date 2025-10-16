@@ -8,111 +8,116 @@ import {
 	UITransform,
 	EventKeyboard,
 	EventTouch,
+	Vec3,
 } from 'cc'
 const { ccclass, property } = _decorator
 
 @ccclass('Platform')
 export class Platform extends Component {
 	@property
-	public Delta: number = 20
+	public moveSpeed: number = 10
 
 	sideX: number = 0
 	moving: boolean = false
-	x: number
-	maxPos: number
-	minPos: number
+	x: number = 0
+	maxPos: number = 0
+	minPos: number = 0
 
 	protected onLoad(): void {
-		this.maxPos =
-			(this.node.parent.getComponent(UITransform) as UITransform).contentSize
-				.width /
-				2 -
-			(this.node.getComponent(UITransform) as UITransform).contentSize.width / 2
-		this.minPos =
-			-(this.node.parent.getComponent(UITransform) as UITransform).contentSize
-				.width /
-				2 +
-			(this.node.getComponent(UITransform) as UITransform).contentSize.width / 2
+		// Calculate movement boundaries
+		this.calculateBoundaries()
 
+		// Listen for input events
 		input.on(Input.EventType.KEY_DOWN, this.onKeyDown, this)
 		input.on(Input.EventType.KEY_UP, this.onKeyUp, this)
 
-		let canvas = this.node.parent
-		canvas.on(Node.EventType.TOUCH_START, this.onTouchStart, this)
-		canvas.on(Node.EventType.TOUCH_END, this.onTouchEnd, this)
-		canvas.on(Node.EventType.TOUCH_CANCEL, this.onTouchCancel, this)
-		canvas.on(Node.EventType.TOUCH_MOVE, this.onTouchMove, this)
+		// Listen for touch events on the canvas
+		const canvas = this.node.parent
+		if (canvas) {
+			canvas.on(Node.EventType.TOUCH_START, this.onTouchStart, this)
+			canvas.on(Node.EventType.TOUCH_MOVE, this.onTouchMove, this)
+			canvas.on(Node.EventType.TOUCH_END, this.onTouchEnd, this)
+			canvas.on(Node.EventType.TOUCH_CANCEL, this.onTouchEnd, this)
+		}
+	}
+
+	calculateBoundaries() {
+		const parentUITransform = this.node.parent?.getComponent(UITransform)
+		const platformUITransform = this.node.getComponent(UITransform)
+
+		if (parentUITransform && platformUITransform) {
+			this.maxPos =
+				parentUITransform.contentSize.width / 2 -
+				platformUITransform.contentSize.width / 2
+			this.minPos = -this.maxPos
+		}
 	}
 
 	onTouchStart(e: EventTouch) {
 		this.moving = true
-		this.x = this.node.x
+		this.moveToTouch(e)
 	}
+
+	onTouchMove(e: EventTouch) {
+		if (!this.moving) return
+		this.moveToTouch(e)
+	}
+
 	onTouchEnd(e: EventTouch) {
 		this.moving = false
 	}
-	onTouchCancel(e: EventTouch) {
-		this.moving = false
-	}
-	onTouchMove(e: EventTouch) {
-		if (!this.moving) return
 
-		this.x += e.getDeltaX()
+	moveToTouch(e: EventTouch) {
+		// Convert touch position to local position
+		const touchPos = e.getUILocation()
+		const worldPos = this.node
+			.parent!.getComponent(UITransform)!
+			.convertToNodeSpaceAR(new Vec3(touchPos.x, touchPos.y, 0))
+		this.setPosition(worldPos.x)
 	}
 
 	onKeyDown(e: EventKeyboard) {
-		if (e.keyCode == KeyCode.ARROW_LEFT) {
-			this.sideX = -1
-		} else if (e.keyCode == KeyCode.ARROW_RIGHT) {
-			this.sideX = 1
-		} else return
+		switch (e.keyCode) {
+			case KeyCode.ARROW_LEFT:
+				this.sideX = -1
+				break
+			case KeyCode.ARROW_RIGHT:
+				this.sideX = 1
+				break
+		}
 	}
 
 	onKeyUp(e: EventKeyboard) {
-		if (e.keyCode == KeyCode.ARROW_LEFT || e.keyCode == KeyCode.ARROW_RIGHT) {
+		if (e.keyCode === KeyCode.ARROW_LEFT || e.keyCode === KeyCode.ARROW_RIGHT) {
 			this.sideX = 0
 		}
 	}
 
 	setPosition(pos: number) {
-		let newPos = pos
-
-		if (newPos > this.maxPos) {
-			newPos = this.maxPos
-		} else if (newPos < this.minPos) {
-			newPos = this.minPos
-		}
-		this.node.x = newPos
-		this.node.emit('moved', newPos)
-	}
-
-	updateByKeys() {
-		if (this.sideX == 0) return
-		this.setPosition(this.node.x + this.Delta * this.sideX)
-	}
-
-	updateByTouch() {
-		this.setPosition(this.x)
+		// Clamp position to boundaries
+		const newPos = Math.max(this.minPos, Math.min(this.maxPos, pos))
+		this.node.setPosition(newPos, this.node.position.y, this.node.position.z)
 	}
 
 	update(deltaTime: number) {
-		if (this.moving) {
-			this.updateByTouch()
-			return
+		// Move platform based on keyboard input
+		if (this.sideX !== 0) {
+			const newPosition = this.node.position.x + this.moveSpeed * this.sideX
+			this.setPosition(newPosition)
 		}
-
-		this.updateByKeys()
 	}
 
 	protected onDestroy(): void {
-		let canvas = this.node.parent
-
+		// Clean up event listeners
 		input.off(Input.EventType.KEY_DOWN, this.onKeyDown, this)
 		input.off(Input.EventType.KEY_UP, this.onKeyUp, this)
 
-		canvas.off(Node.EventType.TOUCH_START, this.onTouchStart, this)
-		canvas.off(Node.EventType.TOUCH_END, this.onTouchEnd, this)
-		canvas.off(Node.EventType.TOUCH_CANCEL, this.onTouchCancel, this)
-		canvas.off(Node.EventType.TOUCH_MOVE, this.onTouchMove, this)
+		const canvas = this.node.parent
+		if (canvas) {
+			canvas.off(Node.EventType.TOUCH_START, this.onTouchStart, this)
+			canvas.off(Node.EventType.TOUCH_MOVE, this.onTouchMove, this)
+			canvas.off(Node.EventType.TOUCH_END, this.onTouchEnd, this)
+			canvas.off(Node.EventType.TOUCH_CANCEL, this.onTouchEnd, this)
+		}
 	}
 }
